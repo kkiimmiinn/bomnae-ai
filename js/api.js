@@ -12,11 +12,13 @@
 const CFG = window.CCAI_CONFIG || { backend: 'local', gasUrl: '' };
 const IS_GAS = CFG.backend === 'gas';
 
-/* 드라이브 파일 ID → 화면에서 쓸 주소 3종 */
+/* 드라이브 파일 ID → 화면에서 쓸 주소들.
+   썸네일은 올린 직후 바로 안 만들어지는 경우가 있어 대체 주소를 함께 줍니다. */
 function driveUrls(id, kind) {
   return {
     url:   `https://drive.google.com/uc?export=download&id=${id}`,
-    thumb: `https://drive.google.com/thumbnail?id=${id}&sz=w1200`,
+    thumb: `https://lh3.googleusercontent.com/d/${id}=w1200`,
+    thumb2: `https://drive.google.com/thumbnail?id=${id}&sz=w1200`,
     embed: `https://drive.google.com/file/d/${id}/preview`,
     kind,
   };

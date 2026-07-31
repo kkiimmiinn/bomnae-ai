@@ -1112,7 +1112,162 @@ function resetBtn() {
           body: [{ type: 'p', text: '이름은 「테스트1」, 학교는 「테스트초」, 이메일은 <b>본인 것</b>을 쓰게 하세요. 절대 실제 학생 이름을 넣지 않습니다. 그 자체가 개인정보 처리입니다.' }],
         },
 
-        { type: 'h', text: '5-6. 심화 — 트리거 (시간 남는 분만)' },
+        { type: 'h', text: '5-6. ★ 더 쉬운 길 — 구글 폼 + 자동 답장 (20분)' },
+        {
+          type: 'note', tone: 'ok', title: '앞의 웹앱이 벅찼던 분께 드리는 두 번째 길입니다',
+          body: [
+            { type: 'p', text: '5-1~5-5는 <b>화면까지 내가 만드는</b> 방식이었습니다. 자유도가 높은 대신 손이 많이 갑니다.' },
+            { type: 'p', text: '여기서는 <b>화면은 구글 폼에 맡기고</b>, 자동화만 앱스스크립트로 붙입니다. <b>코드가 30줄</b>이고 <b>10분이면</b> 됩니다.' },
+            { type: 'p', text: '그리고 이 방식에서만 배울 수 있는 게 하나 있습니다 — <b>트리거</b>. 「누가 폼을 제출하면 그 순간 코드가 저절로 돈다」는 구조입니다.' },
+          ],
+        },
+        { type: 'table', head: ['', '5-1~5-5 웹앱 방식', '5-6 구글 폼 방식'], rows: [
+          ['화면', '내가 HTML로 만듦', '구글 폼이 만들어 줌'],
+          ['코드 분량', '약 120줄', '<b>약 30줄</b>'],
+          ['걸리는 시간', '40분', '<b>10분</b>'],
+          ['실행 방식', '사람이 버튼을 누를 때', '<b>제출되는 순간 자동</b> (트리거)'],
+          ['디자인', '내 마음대로', '구글 폼 틀 안에서'],
+          ['추천', '웹페이지에 폼을 심고 싶을 때', '<b>빨리 접수부터 열어야 할 때</b>'],
+        ] },
+        {
+          type: 'note', tone: 'tip', title: '오늘의 목표 — 두 통의 메일이 저절로 나가게',
+          body: [
+            { type: 'p', text: '① <b>나에게</b> — "설문이 방금 제출되었습니다" + 응답 내용 전부<br>② <b>제출자에게</b> — "참여해 주셔서 감사합니다" 자동 답장' },
+            { type: 'p', text: 'Zapier 같은 유료 도구 없이 <b>0원</b>으로 만듭니다.' },
+          ],
+        },
+
+        { type: 'h3', text: 'STEP 1 · 구글 폼과 시트 연결' },
+        { type: 'olist', items: [
+          '<a href="https://forms.new" target="_blank" rel="noopener">forms.new</a> 로 새 폼 만들기',
+          '우측 상단 <b>설정(톱니바퀴)</b> → <b>응답</b> → <b>「이메일 주소 수집」</b>을 <b>확인됨</b> 또는 <b>응답자 입력</b>으로 ← <b>이걸 안 켜면 답장 보낼 주소가 없습니다</b>',
+          '질문을 2~3개 만듭니다 (이름 / 소속 / 하고 싶은 말)',
+          '<b>응답</b> 탭 → 초록 시트 아이콘 → <b>스프레드시트 만들기</b>',
+          '만들어진 <b>스프레드시트를 엽니다</b> ← 스크립트는 폼이 아니라 <b>시트</b>에 붙입니다',
+        ] },
+        {
+          type: 'note', tone: 'danger', title: '가장 많이 놓치는 곳 — 이메일 주소 수집',
+          body: [{ type: 'p', text: '이 옵션을 안 켜고 코드를 붙이면 <code>responses[\'이메일 주소\']</code> 가 없어서 자동 답장이 안 갑니다. <b>폼 설정에서 먼저 켜세요.</b>' }],
+        },
+
+        { type: 'h3', text: 'STEP 2 · 코드 붙이기' },
+        { type: 'p', text: '스프레드시트에서 <b>확장 프로그램 → Apps Script</b> → 기존 내용을 다 지우고 아래를 붙여넣습니다.' },
+        { type: 'code', lang: 'javascript', label: '구글 폼 자동 메일 — 전체 코드 (고칠 곳 없음)', text: `function onFormSubmit(e) {
+  // 1. 제출된 폼 데이터 가져오기
+  const responses = e.namedValues;
+  const respondentEmail = responses['이메일 주소'][0];
+
+  // [핵심] 백그라운드 트리거 환경의 권한 오류를 방지하기 위해 getEffectiveUser() 적용
+  const myEmail = Session.getEffectiveUser().getEmail();
+
+  // 2. 나에게 오는 '알림 메일' 설정
+  const adminSubject = "[새로운 폼 응답] 설문이 방금 제출되었습니다.";
+  let adminBody = "새로운 응답 내역은 다음과 같습니다.\\n\\n";
+  for (let key in responses) {
+    adminBody += \`\${key}: \${responses[key][0]}\\n\`;
+  }
+
+  // 3. 상대방에게 가는 '자동 답장 메일' 설정
+  const replySubject = "[자동 답장] 설문 참여에 감사드립니다.";
+  const replyBody = \`안녕하세요,\\n\\n설문에 참여해 주셔서 진심으로 감사드립니다.\\n보내주신 응답이 성공적으로 접수되었습니다.\\n\\n감사합니다.\`;
+
+  // 4. 메일 발송 실행
+  try {
+    GmailApp.sendEmail(myEmail, adminSubject, adminBody);
+    if (respondentEmail) {
+      GmailApp.sendEmail(respondentEmail, replySubject, replyBody);
+    }
+  } catch (error) {
+    console.error("메일 발송 중 오류 발생: " + error);
+  }
+}` },
+        {
+          type: 'note', tone: 'danger', title: '이 한 줄이 이 교시의 핵심입니다',
+          body: [
+            { type: 'p', text: '<code>Session.getEffectiveUser()</code> — 왜 <code>getActiveUser()</code> 가 아닐까요?' },
+            { type: 'p', text: '트리거는 <b>사람이 화면 앞에 없을 때</b> 백그라운드에서 돕니다. 그 순간 <code>getActiveUser()</code> 는 <b>"지금 이 화면을 보고 있는 사람"</b>을 찾는데, 아무도 없으니 <b>빈 값</b>이 돌아오고 메일이 안 나갑니다.' },
+            { type: 'p', text: '<code>getEffectiveUser()</code> 는 <b>"이 스크립트를 소유한 사람"</b>, 즉 선생님을 가리킵니다. 화면에 사람이 있든 없든 항상 같은 값입니다.' },
+            { type: 'p', text: '<b>수강생이 가장 많이 막히는 지점이라 미리 막아 둔 것</b>입니다. 이 줄을 <code>getActiveUser()</code> 로 바꿔서 일부러 실패시켜 보여주면 이해가 확 됩니다.' },
+          ],
+        },
+
+        { type: 'h3', text: 'STEP 3 · 트리거 걸기 ★ 여기가 새로 배우는 것' },
+        {
+          type: 'note', tone: 'info', title: '트리거가 뭔가요',
+          body: [
+            { type: 'p', text: '<b>「○○가 일어나면 △△함수를 자동으로 실행해라」</b> 라는 예약입니다.' },
+            { type: 'p', text: '지금까지는 사람이 버튼을 눌러야 코드가 돌았습니다. 트리거를 걸면 <b>새벽 3시에 누가 폼을 내도</b> 그 순간 메일이 나갑니다.' },
+          ],
+        },
+        { type: 'code', label: '트리거 등록 절차', text: '1. Apps Script 왼쪽 메뉴에서 시계 아이콘(트리거) 클릭\n2. 우측 하단 「트리거 추가」\n3. 실행할 함수      : onFormSubmit\n4. 이벤트 소스      : 스프레드시트에서\n5. 이벤트 유형      : 양식 제출 시      ← 「수정 시」 아님. 주의\n6. 저장' },
+        {
+          type: 'note', tone: 'warn', title: '저장을 누르면 보안 경고가 뜹니다 — 정상입니다',
+          body: [
+            { type: 'p', text: '<b>고급</b> → <b>(프로젝트 이름)(으)로 이동(안전하지 않음)</b> → <b>허용</b>' },
+            { type: 'p', text: '선생님이 직접 만든 스크립트라 구글 심사를 안 거쳤을 뿐입니다. <b>참가자들이 여기서 겁먹고 멈추니 화면을 띄워 놓고 함께 진행하세요.</b>' },
+            { type: 'p', text: '메일을 보내는 코드라 <b>Gmail 권한</b>을 요구합니다. 이것도 정상입니다.' },
+          ],
+        },
+        { type: 'table', head: ['이벤트 유형', '언제 도나', '오늘 쓸 것'], rows: [
+          ['<b>양식 제출 시</b>', '폼이 제출된 순간', '○ <b>이걸 고릅니다</b>'],
+          ['수정 시', '시트 칸을 손으로 고칠 때', '✕ 폼 제출로는 안 돎'],
+          ['변경 시', '행 추가·삭제 등 구조가 바뀔 때', '✕'],
+          ['열 때', '시트를 열 때', '✕'],
+          ['시간 기반', '정해둔 시각마다', '5-7에서 다룹니다'],
+        ] },
+
+        { type: 'h3', text: 'STEP 4 · 실제로 제출해 보기' },
+        { type: 'olist', items: [
+          '폼 우측 상단 <b>미리보기(눈 아이콘)</b> → 실제 폼 화면이 열립니다',
+          '<b>본인 이메일</b>로 한 번 제출합니다',
+          '10~30초 뒤 <b>받은편지함 확인</b> — 두 통이 와 있어야 합니다',
+        ] },
+        {
+          type: 'note', tone: 'ok', title: '두 통이 도착하면 완성입니다',
+          body: [{ type: 'p', text: '① <b>[새로운 폼 응답]</b> — 나에게, 응답 내용 전부<br>② <b>[자동 답장]</b> — 제출자에게, 감사 인사<br><br>사람이 아무것도 안 눌렀는데 메일이 두 통 나갔습니다. <b>이게 자동화입니다.</b>' }],
+        },
+
+        { type: 'h3', text: '안 될 때' },
+        { type: 'table', head: ['증상', '원인', '처방'], rows: [
+          ['아무 메일도 안 옴', '트리거를 안 걸었거나 유형이 틀림', '트리거 목록에서 <b>「양식 제출 시」</b>인지 확인'],
+          ['<b>내 메일만 오고 답장이 안 감</b>', '폼에서 이메일 수집을 안 켬', '폼 설정 → 응답 → <b>이메일 주소 수집</b> 켜기'],
+          ['<code>responses[\'이메일 주소\']</code> 오류', '폼 언어가 영어라 항목명이 <code>Email Address</code>', '코드의 <code>\'이메일 주소\'</code> 를 실제 열 이름으로 교체'],
+          ['권한 오류가 남', '<code>getActiveUser()</code> 를 쓰고 있음', '<b><code>getEffectiveUser()</code></b> 로 교체'],
+          ['스팸함에 들어감', '자동 발송 메일 특성', '스팸함 확인 후 <b>스팸 아님</b> 표시'],
+          ['하루 100통에서 멈춤', '개인 gmail 계정', '<b>교육청 Workspace 계정</b>으로 (하루 1,500통)'],
+        ] },
+        {
+          type: 'note', tone: 'tip', title: '여기서 한 걸음 더 — 학생 지도로',
+          body: [
+            { type: 'p', text: '이 구조를 알면 <b>가정통신문 회신, 동아리 신청, 캠프 사전 설문</b>이 전부 자동이 됩니다. 폼만 새로 만들고 코드는 그대로 복사하면 됩니다.' },
+            { type: 'p', text: '답장 문구(<code>replyBody</code>)에 <b>준비물·일정·문의처</b>를 넣어 두면, 신청과 동시에 안내가 나갑니다. 전화 문의가 눈에 띄게 줄어듭니다.' },
+          ],
+        },
+
+        { type: 'practice', n: '5-B', title: '구글 폼 자동 답장 만들기', min: 20,
+          mission: '내가 아무것도 안 눌러도 <b>두 통의 메일</b>이 나가게 하라.',
+          schedule: [
+            ['0~5분', '폼 만들기 + <b>이메일 주소 수집 켜기</b> + 시트 연결'],
+            ['5~10분', '시트 → 확장 프로그램 → Apps Script → 코드 붙여넣기'],
+            ['10~15분', '트리거 등록 (<b>양식 제출 시</b>) + 권한 승인'],
+            ['15~20분', '본인 이메일로 제출 → 두 통 도착 확인'],
+          ],
+          checkId: 'd1-prac5b',
+          check: [
+            '폼 설정에서 <b>이메일 주소 수집</b>을 켰다',
+            '응답 시트를 만들고 <b>시트에서</b> Apps Script를 열었다',
+            '코드를 붙이고 저장했다',
+            '트리거를 <b>「양식 제출 시」</b>로 등록했다',
+            '권한 승인 화면(<b>고급 → 이동 → 허용</b>)을 통과했다',
+            '본인 이메일로 제출했다',
+            '<b>나에게 오는 알림 메일</b> 도착 확인',
+            '<b>제출자에게 가는 자동 답장</b> 도착 확인',
+            '<code>getEffectiveUser()</code> 를 왜 쓰는지 옆 사람에게 설명할 수 있다',
+          ],
+          upload: { day: 1, section: 'form' },
+        },
+
+        { type: 'h', text: '5-7. 심화 — 트리거 (시간 남는 분만)' },
         { type: 'code', lang: 'javascript', label: '매일 아침 현황 요약 메일', text: `/***** 일일 현황 요약 — 시간 기반 트리거로 실행 *****/
 function dailySummary() {
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
@@ -1186,7 +1341,7 @@ function autoReplyToInquiries() {
           body: [{ type: 'p', text: '라벨을 옮기는 마지막 두 줄이 안전장치입니다.' }],
         },
 
-        { type: 'h', text: '5-7. 오류별 처방전' },
+        { type: 'h', text: '5-8. 오류별 처방전' },
         { type: 'table', head: ['증상', '원인', '처방'], rows: [
           ['버튼을 눌러도 반응이 없다', '<code>onclick="submitForm()"</code> 누락', '버튼 태그 확인'],
           ['<b>시트에 안 쌓인다</b>', '배포 설정 「실행 = 웹 앱 사용자」', '<b>「실행 = 나」로 재배포</b>'],

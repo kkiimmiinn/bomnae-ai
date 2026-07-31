@@ -506,9 +506,7 @@ function pageGallery(q) {
 
   $('#toggleUp').addEventListener('click', () => {
     const b = $('#upBox');
-    const show = b.style.display === 'none';
-    b.style.display = show ? 'block' : 'none';
-    if (show) b.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (b.style.display === 'none') openUploadBox(); else b.style.display = 'none';
   });
 
   bindUploadForm();
@@ -535,6 +533,17 @@ function pageGallery(q) {
     else if (ev === 'error') $('#liveState').textContent = '실시간 연결 끊김 (새로고침하면 최신 목록)';
     else refresh();
   });
+}
+
+/** 업로드 창 열기 — 페이지를 다시 부르지 않고 그 자리에서 엽니다 */
+function openUploadBox() {
+  const b = $('#upBox');
+  if (!b) return;
+  b.style.display = 'block';
+  const done = $('#upDone');
+  if (done) { done.style.display = 'none'; done.innerHTML = ''; }
+  b.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => $('#upForm [name=author]')?.focus(), 350);
 }
 
 function uploadFormHTML(day, section) {
@@ -622,6 +631,7 @@ function uploadFormHTML(day, section) {
 
     <div class="progress" id="upProg"><i></i></div>
     <div class="small muted" id="upNote" style="margin-top:6px"></div>
+    <div class="up-done" id="upDone" style="display:none"></div>
     <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
       <button type="submit" class="btn btn-gold" id="upBtn">올리기</button>
       <button type="button" class="btn btn-ghost" id="upCancel">닫기</button>
@@ -720,9 +730,33 @@ function bindUploadForm() {
         const mine = store.get('mine', {});
         mine[res.work.id] = res.editKey;
         store.set('mine', mine);
-        toast('올렸습니다! 갤러리에 바로 나타납니다', 'ok');
-        form.reset(); files.length = 0; paint(); fillSections();
-        $('#upBox').style.display = 'none';
+        toast('올렸습니다', 'ok');
+
+        // 폼은 열어 둡니다 — 보통 여러 개를 이어서 올리기 때문입니다.
+        // 이름·소속은 남겨 두고 나머지만 비웁니다.
+        const keepAuthor = form.author.value;
+        const keepSchool = form.school.value;
+        const keepDay = form.day.value;
+        form.reset();
+        form.author.value = keepAuthor;
+        form.school.value = keepSchool;
+        form.day.value = keepDay;
+        files.length = 0; paint(); fillSections();
+
+        const done = $('#upDone');
+        if (done) {
+          done.innerHTML = `${svgIcon('check', 17)}
+            <span><b>「${esc(res.work.title)}」</b> 올라갔습니다.
+            이어서 더 올리시려면 위 칸을 채우고 <b>올리기</b>를 누르세요.</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="upClose2">그만 올리고 목록 보기</button>`;
+          done.style.display = 'flex';
+          $('#upClose2').addEventListener('click', () => {
+            $('#upBox').style.display = 'none';
+            $('#works')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }
+        form.querySelector('[name=title]')?.focus();
+
         const g = $('#works');
         if (g) loadWorks({ into: g, countInto: $('#cnt') });
       } else {
@@ -754,12 +788,17 @@ async function loadWorks({ day = 'all', section = 'all', q = '', limit = 0, into
     if (countInto) countInto.textContent = `${data.count}건`;
 
     if (!items.length) {
+      // 업로드 창이 이미 열려 있으면 아래쪽에 또 「올리기」 버튼을 두지 않습니다.
+      // 그걸 누르면 페이지가 다시 불려서 쓰던 폼이 날아가기 때문입니다.
+      const upOpen = $('#upBox') && $('#upBox').style.display !== 'none';
+      const filtered = q || day !== 'all' || section !== 'all';
       into.innerHTML = `<div class="empty" style="grid-column:1/-1">
         <div class="ic">${svgIcon('box', 44)}</div>
-        <h3>${q || day !== 'all' || section !== 'all' ? '조건에 맞는 결과물이 없습니다' : '아직 올라온 결과물이 없습니다'}</h3>
-        <p class="small">첫 번째로 올려 보세요. 실패한 프롬프트도 훌륭한 자산입니다.</p>
-        <p style="margin-top:16px"><a class="btn btn-sm" href="#/gallery?upload=1">결과물 올리기</a></p>
+        <h3>${filtered ? '조건에 맞는 결과물이 없습니다' : '아직 올라온 결과물이 없습니다'}</h3>
+        <p class="small">${filtered ? '거르기를 「전체」로 바꿔 보세요.' : '첫 번째로 올려 보세요. 실패한 프롬프트도 훌륭한 자산입니다.'}</p>
+        ${upOpen || filtered ? '' : '<p style="margin-top:16px"><button class="btn btn-sm" id="emptyUp">결과물 올리기</button></p>'}
       </div>`;
+      $('#emptyUp')?.addEventListener('click', openUploadBox);
       return;
     }
     into.innerHTML = items.map(workHTML).join('');
@@ -781,14 +820,20 @@ function workHTML(w) {
   const imgs = (w.files || []).filter((f) => f.kind === 'image');
   const vids = (w.files || []).filter((f) => f.kind === 'video');
   const cover = imgs[0];
-  // 드라이브에 있는 파일은 썸네일·미리보기 주소가 따로 있습니다
+  const others = (w.files || []).filter((f) => f.kind !== 'image');
+  // 드라이브 파일은 썸네일·미리보기 주소가 따로 있고, 썸네일 생성이 늦을 수 있어
+  // data-alt 로 대체 주소를 함께 넘겨 실패 시 갈아탑니다.
   const media = cover
-    ? `<img src="${esc(cover.thumb || cover.url)}" alt="${esc(w.title)}" loading="lazy" data-zoom="${esc(cover.thumb || cover.url)}">`
+    ? `<img src="${esc(cover.thumb || cover.url)}" alt="${esc(w.title)}" loading="lazy"
+         data-alt="${esc(cover.thumb2 || '')}" data-zoom="${esc(cover.thumb || cover.url)}">`
     : vids[0]
       ? (vids[0].embed
         ? `<iframe src="${esc(vids[0].embed)}" allow="autoplay" allowfullscreen loading="lazy" title="${esc(w.title)}"></iframe>`
         : `<video src="${esc(vids[0].url)}" controls preload="metadata" playsinline></video>`)
-      : `<div class="noimg">${(w.links || []).length ? svgIcon('link', 40) : svgIcon('doc', 40)}</div>`;
+      : `<div class="noimg">
+           ${(w.links || []).length ? svgIcon('link', 34) : svgIcon(others[0] ? ({ audio: 'music', file: 'doc' }[others[0].kind] || 'doc') : 'doc', 34)}
+           <span>${(w.links || []).length ? '링크 결과물' : (others[0] ? esc(others[0].originalName) : '파일')}</span>
+         </div>`;
   const extra = (w.files || []).length > 1 ? `<span class="cnt">파일 ${w.files.length}</span>` : '';
   const isMine = Boolean((store.get('mine', {}) || {})[w.id]);
   const isLiked = liked.includes(w.id);
@@ -828,38 +873,76 @@ function workHTML(w) {
   </article>`;
 }
 
-function cmtHTML(c) {
-  return `<div class="cmt"><b>${esc(c.author)}</b><time>${esc(timeAgo(c.createdAt))}</time><br>${esc(c.text)}</div>`;
+function cmtHTML(c, pending) {
+  return `<div class="cmt${pending ? ' pending' : ''}"><b>${esc(c.author)}</b><time>${esc(timeAgo(c.createdAt))}</time><br>${esc(c.text)}</div>`;
 }
 
 function bindWorkCards(root) {
   $$('.work', root).forEach((card) => {
     const id = card.dataset.id;
 
-    $('[data-like]', card)?.addEventListener('click', async (e) => {
+    // 좋아요 — 화면을 먼저 바꾸고 서버는 뒤따라갑니다. 실패하면 되돌립니다.
+    $('[data-like]', card)?.addEventListener('click', (e) => {
       const btn = e.currentTarget;
+      if (btn.dataset.busy) return;                 // 연타 방지
+      btn.dataset.busy = '1';
+
       const undo = liked.includes(id);
-      const res = await API.like(id, undo).catch(() => null);
-      if (!res || !res.ok) return toast('처리하지 못했습니다', 'err');
+      const num = $('span', btn);
+      const before = Number(num.textContent) || 0;
+
       liked = undo ? liked.filter((x) => x !== id) : [...liked, id];
       store.set('liked', liked);
       btn.classList.toggle('liked', !undo);
-      $('span', btn).textContent = res.likes;
+      num.textContent = Math.max(0, before + (undo ? -1 : 1));
+
+      API.like(id, undo).then((res) => {
+        if (res && res.ok) num.textContent = res.likes;
+        else throw new Error();
+      }).catch(() => {
+        liked = undo ? [...liked, id] : liked.filter((x) => x !== id);
+        store.set('liked', liked);
+        btn.classList.toggle('liked', undo);
+        num.textContent = before;
+        toast('좋아요를 저장하지 못했습니다', 'err');
+      }).finally(() => { delete btn.dataset.busy; });
     });
 
     $('[data-cmt]', card)?.addEventListener('click', () => $('.cmts', card).classList.toggle('open'));
 
-    const send = async () => {
+    // 피드백 — 언제나 익명. 화면에 먼저 붙이고 서버는 뒤따라갑니다.
+    const send = () => {
       const input = $('[data-cmt-input]', card);
+      const btn = $('[data-cmt-send]', card);
       const text = input.value.trim();
-      if (!text) return;
-      const me = store.get('me', { author: '' });
-      const res = await API.comment(id, me.author || '익명', text).catch(() => null);
-      if (!res || !res.ok) return toast(res?.message || '등록하지 못했습니다', 'err');
+      if (!text || btn.dataset.busy) return;
+
+      const bad = findBadWord(text);
+      if (bad) {
+        toast('거친 표현이 있어 등록하지 않았습니다. 다듬어 주세요.', 'err');
+        input.focus();
+        return;
+      }
+
+      btn.dataset.busy = '1';
       const listEl = $('[data-cmt-list]', card);
       if (listEl.querySelector('p')) listEl.innerHTML = '';
-      listEl.insertAdjacentHTML('beforeend', cmtHTML(res.comment));
+      const temp = { id: 'tmp', author: '익명', text, createdAt: new Date().toISOString() };
+      listEl.insertAdjacentHTML('beforeend', cmtHTML(temp, true));
+      const row = listEl.lastElementChild;
       input.value = '';
+
+      API.comment(id, '익명', text).then((res) => {
+        if (!res || !res.ok) throw new Error(res?.message || '');
+        row.classList.remove('pending');
+        const n = $('[data-cmt] span', card) || $('[data-cmt]', card);
+        const cnt = listEl.querySelectorAll('.cmt').length;
+        if (n) n.textContent = cnt;
+      }).catch((err) => {
+        row.remove();
+        input.value = text;
+        toast(err.message || '등록하지 못했습니다', 'err');
+      }).finally(() => { delete btn.dataset.busy; });
     };
     $('[data-cmt-send]', card)?.addEventListener('click', send);
     $('[data-cmt-input]', card)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
@@ -874,6 +957,23 @@ function bindWorkCards(root) {
     });
 
     $('.work-media video', card)?.addEventListener('dblclick', (e) => lightbox(e.currentTarget.src, 'video'));
+
+    // 드라이브 썸네일이 아직 안 만들어졌으면 대체 주소로, 그것도 안 되면 아이콘으로
+    const cov = $('.work-media img', card);
+    if (cov) {
+      cov.addEventListener('error', () => {
+        const alt = cov.dataset.alt;
+        if (alt && cov.src !== alt) { cov.src = alt; cov.dataset.zoom = alt; cov.dataset.alt = ''; return; }
+        if (cov.dataset.retry) {
+          cov.replaceWith(Object.assign(document.createElement('div'), {
+            className: 'noimg', innerHTML: svgIcon('image', 34) + '<span>미리보기 준비 중</span>',
+          }));
+          return;
+        }
+        cov.dataset.retry = '1';                    // 방금 올린 파일이면 잠시 뒤 다시
+        setTimeout(() => { cov.src = cov.dataset.zoom + '&_r=' + Date.now(); }, 4000);
+      });
+    }
   });
 }
 

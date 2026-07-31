@@ -701,7 +701,27 @@ select.inp option { background: #12101C; color: var(--ink); }
 .work-media img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
 .work-media video { width: 100%; height: 100%; object-fit: cover; background: #000; }
 .work-media iframe { width: 100%; height: 100%; border: 0; background: #000; }
-.work-media .noimg { font-size: 40px; opacity: .3; color: var(--acc); }
+.work-media .noimg {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  color: var(--acc); opacity: .65; padding: 16px; text-align: center;
+}
+.work-media .noimg span {
+  font-size: 12.5px; font-weight: 700; color: var(--ink-2);
+  max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 올린 직후 잠깐 흐리게 — 서버 확인이 끝나면 또렷해집니다 */
+.cmt.pending { opacity: .5; }
+
+.up-done {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 16px; padding: 14px 16px; font-size: 14px; color: var(--ink-2);
+  background: rgba(var(--ok-rgb), .12); border: 1px solid rgba(var(--ok-rgb), .4);
+  clip-path: polygon(11px 0, 100% 0, 100% calc(100% - 11px), calc(100% - 11px) 100%, 0 100%, 0 11px);
+}
+.up-done .ico { color: var(--ok); flex: none; }
+.up-done span { flex: 1; min-width: 200px; }
+.up-done b { color: var(--ink); }
 .work-media .cnt {
   position: absolute; right: 8px; bottom: 8px; background: rgba(0,0,0,.8); color: var(--acc-hi);
   font-size: 11.5px; font-weight: 800; padding: 3px 10px; border: 1px solid var(--line);
