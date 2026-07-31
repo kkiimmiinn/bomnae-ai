@@ -264,7 +264,7 @@ window.MATERIALS = [
     kind: 'notion', icon: 'book',
     title: 'DAY 2 강의 자료 원본 (노션)',
     sub: '춘천 설화 × AI 영상 제작',
-    href: 'https://fate-moustache-ba0.notion.site/AI-6H-082b48c2e51b832f94f781927a26a671',
+    href: 'https://choinssam.notion.site/AI-6H-3ae452af4f1281c89abbcb525c99d383',
     desc: '2일차 원본입니다. 삽화 스타일 예시 이미지와 프롬프트가 함께 들어 있습니다.',
   },
   {

@@ -600,7 +600,11 @@ function exitEdit() {
   }
   if ($('#upBtn')) $('#upBtn').textContent = '올리기';
   if ($('#upCancel')) $('#upCancel').textContent = '닫기';
-  if (form) { form.reset(); form.dispatchEvent(new CustomEvent('ccai:refill')); }
+  if (form) {
+    form.reset();
+    form.dispatchEvent(new CustomEvent('ccai:refill'));
+    form.dispatchEvent(new CustomEvent('ccai:clearthumb'));
+  }
   paintExistingFiles();
 }
 
@@ -705,6 +709,23 @@ function uploadFormHTML(day, section) {
           accept=".png,.jpg,.jpeg,.gif,.webp,.avif,.svg,.mp4,.mov,.webm,.m4v,.mp3,.wav,.m4a,.ogg,.pdf,.hwp,.hwpx,.docx,.pptx,.xlsx,.zip,.txt,.md">
         <div class="filelist" id="fileList"></div>
       </div>
+
+      <div class="fld full">
+        <label>썸네일 <span class="hint">영상을 올릴 때 권장 — 카드에 이 그림이 보이고, 누르면 영상이 재생됩니다</span></label>
+        <div class="thumb-pick" id="thumbPick">
+          <div class="thumb-prev" id="thumbPrev">${svgIcon('image', 24)}</div>
+          <div class="thumb-txt">
+            <b>표지 그림 고르기</b>
+            <span>png · jpg · webp · 8컷 중 한 장이나 대표 장면 캡처를 넣으세요</span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" id="thumbClear" style="display:none">빼기</button>
+        </div>
+        <input type="file" id="thumbInput" class="sr" accept=".png,.jpg,.jpeg,.webp,.avif,.gif">
+        <span class="hint" style="margin-top:6px;display:block">
+          영상은 드라이브가 재생 준비를 하는 데 <b>몇 분</b> 걸립니다.
+          썸네일을 함께 올리면 그동안에도 카드가 보기 좋습니다.
+        </span>
+      </div>
     </div>
 
     <div class="note note-danger" style="margin:20px 0 0">
@@ -730,6 +751,7 @@ function bindUploadForm() {
   const form = $('#upForm');
   if (!form) return;
   const files = [];
+  let thumbFile = null;
   const daySel = $('#upDay'), secSel = $('#upSec'), hint = $('#secHint');
   const wantSection = new URLSearchParams((location.hash.split('?')[1] || '')).get('section');
 
@@ -774,6 +796,34 @@ function bindUploadForm() {
 
   drop.addEventListener('click', () => input.click());
   input.addEventListener('change', () => { add(input.files); input.value = ''; });
+
+  /* ── 썸네일 고르기 ── */
+  const tPick = $('#thumbPick'), tInput = $('#thumbInput'), tPrev = $('#thumbPrev'), tClear = $('#thumbClear');
+  const setThumb = (file) => {
+    thumbFile = file || null;
+    if (!file) {
+      tPrev.innerHTML = svgIcon('image', 24);
+      tPrev.classList.remove('has');
+      tClear.style.display = 'none';
+      $('b', tPick).textContent = '표지 그림 고르기';
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    tPrev.innerHTML = `<img src="${url}" alt="">`;
+    tPrev.classList.add('has');
+    tClear.style.display = '';
+    $('b', tPick).textContent = file.name;
+  };
+  tPick.addEventListener('click', (e) => { if (e.target !== tClear) tInput.click(); });
+  tClear.addEventListener('click', (e) => { e.stopPropagation(); setThumb(null); tInput.value = ''; });
+  tInput.addEventListener('change', () => {
+    const f = tInput.files[0];
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { toast('썸네일은 이미지 파일이어야 합니다', 'err'); tInput.value = ''; return; }
+    if (f.size > 20 * 1024 * 1024) { toast('썸네일은 20MB 이하로 해주세요', 'err'); tInput.value = ''; return; }
+    setThumb(f);
+  });
+  form.addEventListener('ccai:clearthumb', () => { setThumb(null); tInput.value = ''; });
   ['dragenter', 'dragover'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((e) => drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', (ev) => add(ev.dataTransfer.files));
@@ -825,8 +875,8 @@ function bindUploadForm() {
 
     const task = isEdit
       ? API.update(editing.id, fields, files, removeMarked, onProg,
-        { editKey: (store.get('mine', {}) || {})[editing.id] || '' })
-      : API.create(fields, files, onProg);
+        { editKey: (store.get('mine', {}) || {})[editing.id] || '' }, { thumb: thumbFile })
+      : API.create(fields, files, onProg, { thumb: thumbFile });
 
     task.then((res) => {
       done();
@@ -859,6 +909,7 @@ function bindUploadForm() {
         form.school.value = keepSchool;
         form.day.value = keepDay;
         files.length = 0; paint(); fillSections();
+        form.dispatchEvent(new CustomEvent('ccai:clearthumb'));
 
         const done = $('#upDone');
         if (done) {
@@ -936,21 +987,32 @@ async function loadWorks({ day = 'all', section = 'all', q = '', limit = 0, into
 function workHTML(w) {
   const imgs = (w.files || []).filter((f) => f.kind === 'image');
   const vids = (w.files || []).filter((f) => f.kind === 'video');
-  const cover = imgs[0];
+  // 표지는 ① 따로 올린 썸네일 ② 없으면 첫 이미지
+  const cover = (w.files || []).find((f) => f.role === 'thumb') || imgs[0];
+  const video = vids[0];
   const others = (w.files || []).filter((f) => f.kind !== 'image');
-  // 드라이브 파일은 썸네일·미리보기 주소가 따로 있고, 썸네일 생성이 늦을 수 있어
-  // data-alt 로 대체 주소를 함께 넘겨 실패 시 갈아탑니다.
-  const media = cover
-    ? `<img src="${esc(cover.thumb || cover.url)}" alt="${esc(w.title)}" loading="lazy"
-         data-alt="${esc(cover.thumb2 || '')}" data-zoom="${esc(cover.thumb || cover.url)}">`
-    : vids[0]
-      ? (vids[0].embed
-        ? `<iframe src="${esc(vids[0].embed)}" allow="autoplay" allowfullscreen loading="lazy" title="${esc(w.title)}"></iframe>`
-        : `<video src="${esc(vids[0].url)}" controls preload="metadata" playsinline></video>`)
-      : `<div class="noimg">
-           ${(w.links || []).length ? svgIcon('link', 34) : svgIcon(others[0] ? ({ audio: 'music', file: 'doc' }[others[0].kind] || 'doc') : 'doc', 34)}
-           <span>${(w.links || []).length ? '링크 결과물' : (others[0] ? esc(others[0].originalName) : '파일')}</span>
-         </div>`;
+
+  const coverImg = (extra = '') => `<img src="${esc(cover.thumb || cover.url)}" alt="${esc(w.title)}" loading="lazy"
+    data-alt="${esc(cover.thumb2 || '')}" ${extra}>`;
+
+  let media;
+  if (video) {
+    // 영상은 카드에서 바로 재생하지 않고, 눌렀을 때 큰 화면으로 스트리밍합니다.
+    // (드라이브 재생기를 작은 칸에 넣으면 「처리 중」 안내만 보입니다)
+    media = `<button class="play-wrap" data-play="${esc(video.embed || video.url)}"
+        data-playkind="${video.embed ? 'embed' : 'video'}" aria-label="${esc(w.title)} 재생">
+        ${cover ? coverImg() : `<span class="noimg">${svgIcon('video', 34)}<span>영상</span></span>`}
+        <span class="play-btn">${svgIcon('video', 26)}</span>
+        <span class="play-lbl">눌러서 재생</span>
+      </button>`;
+  } else if (cover) {
+    media = coverImg(`data-zoom="${esc(cover.thumb || cover.url)}"`);
+  } else {
+    media = `<div class="noimg">
+      ${(w.links || []).length ? svgIcon('link', 34) : svgIcon(others[0] ? ({ audio: 'music', file: 'doc' }[others[0].kind] || 'doc') : 'doc', 34)}
+      <span>${(w.links || []).length ? '링크 결과물' : (others[0] ? esc(others[0].originalName) : '파일')}</span>
+    </div>`;
+  }
   const extra = (w.files || []).length > 1 ? `<span class="cnt">파일 ${w.files.length}</span>` : '';
   const isMine = Boolean((store.get('mine', {}) || {})[w.id]);
   const isLiked = liked.includes(w.id);
@@ -1077,7 +1139,11 @@ function bindWorkCards(root, items = []) {
       toast('삭제했습니다', 'ok');
     });
 
-    $('.work-media video', card)?.addEventListener('dblclick', (e) => lightbox(e.currentTarget.src, 'video'));
+    // 영상 — 눌러서 큰 화면으로 스트리밍
+    $('[data-play]', card)?.addEventListener('click', (e) => {
+      const b = e.currentTarget;
+      lightbox(b.dataset.play, b.dataset.playkind);
+    });
 
     // 드라이브 썸네일이 아직 안 만들어졌으면 대체 주소로, 그것도 안 되면 아이콘으로
     const cov = $('.work-media img', card);

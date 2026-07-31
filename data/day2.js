@@ -4,7 +4,7 @@ window.DAY2 = {
   slug: 'day2',
   title: '춘천 설화 × AI 영상 제작',
   subtitle: '기획에서 완성 MP4까지, 하루에 한 편',
-  notion: 'https://fate-moustache-ba0.notion.site/AI-6H-082b48c2e51b832f94f781927a26a671',
+  notion: 'https://choinssam.notion.site/AI-6H-3ae452af4f1281c89abbcb525c99d383',
   hours: 6,
   accent: '#7A2E1E',
   oneLine: '그릇에 담을 <b>이야기</b>를 만든다',

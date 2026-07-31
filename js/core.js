@@ -90,9 +90,17 @@ function lightbox(src, kind = 'image') {
     });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
   }
-  $('.lb-in', lb).innerHTML = kind === 'video'
-    ? `<video src="${esc(src)}" controls autoplay playsinline></video>`
-    : `<img src="${esc(src)}" alt="">`;
+  const box = $('.lb-in', lb);
+  if (kind === 'embed') {
+    // 구글 드라이브 재생기 — 내려받지 않고 이 자리에서 바로 봅니다
+    box.innerHTML = `<div class="lb-frame">
+      <iframe src="${esc(src)}" allow="autoplay; fullscreen" allowfullscreen title="영상 재생"></iframe>
+    </div>`;
+  } else if (kind === 'video') {
+    box.innerHTML = `<video src="${esc(src)}" controls autoplay playsinline></video>`;
+  } else {
+    box.innerHTML = `<img src="${esc(src)}" alt="">`;
+  }
   lb.classList.add('on');
   document.body.style.overflow = 'hidden';
 }

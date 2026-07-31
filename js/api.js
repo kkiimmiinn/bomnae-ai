@@ -210,9 +210,9 @@ window.API = {
    * @param files  File 배열
    * @param onProgress (올린바이트, 전체바이트, 현재파일명) => void
    */
-  async create(fields, files, onProgress) {
-    if (!IS_GAS) return createLocal(fields, files, onProgress);
-    return createGas(fields, files, onProgress);
+  async create(fields, files, onProgress, opts = {}) {
+    if (!IS_GAS) return createLocal(fields, files, onProgress, opts);
+    return createGas(fields, files, onProgress, opts);
   },
 
   /**
@@ -220,9 +220,9 @@ window.API = {
    * @param removeIds 뺄 기존 파일 — local 은 저장 파일명, gas 는 드라이브 ID
    * @param newFiles  새로 붙일 File 배열
    */
-  async update(id, fields, newFiles, removeIds, onProgress, auth = {}) {
-    if (!IS_GAS) return updateLocal(id, fields, newFiles, removeIds, onProgress, auth);
-    return updateGas(id, fields, newFiles, removeIds, onProgress, auth);
+  async update(id, fields, newFiles, removeIds, onProgress, auth = {}, opts = {}) {
+    if (!IS_GAS) return updateLocal(id, fields, newFiles, removeIds, onProgress, auth, opts);
+    return updateGas(id, fields, newFiles, removeIds, onProgress, auth, opts);
   },
 
   async like(id, undo) {
@@ -323,11 +323,12 @@ window.API = {
 };
 
 /* ── local 업로드 ────────────────────────────────────────── */
-function createLocal(fields, files, onProgress) {
+function createLocal(fields, files, onProgress, opts = {}) {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) fd.append(k, v);
     for (const f of files) fd.append('files', f, f.name);
+    if (opts.thumb) fd.append('thumb', opts.thumb, opts.thumb.name);
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/works');
@@ -346,12 +347,13 @@ function createLocal(fields, files, onProgress) {
 }
 
 /* ── local 수정 ──────────────────────────────────────────── */
-function updateLocal(id, fields, newFiles, removeIds, onProgress, auth) {
+function updateLocal(id, fields, newFiles, removeIds, onProgress, auth, opts = {}) {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     for (const [k, v] of Object.entries(fields)) fd.append(k, v);
     fd.append('removeIds', (removeIds || []).join(','));
     for (const f of newFiles || []) fd.append('files', f, f.name);
+    if (opts.thumb) fd.append('thumb', opts.thumb, opts.thumb.name);
 
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', `/api/works/${id}`);
@@ -371,8 +373,8 @@ function updateLocal(id, fields, newFiles, removeIds, onProgress, auth) {
 }
 
 /* ── gas 수정 ────────────────────────────────────────────── */
-async function updateGas(id, fields, newFiles, removeIds, onProgress, auth) {
-  const uploaded = await sendFilesToDrive(newFiles || [], onProgress);
+async function updateGas(id, fields, newFiles, removeIds, onProgress, auth, opts = {}) {
+  const uploaded = await sendFilesToDrive(newFiles || [], onProgress, opts.thumb);
   if (uploaded.error) return { ok: false, message: uploaded.error };
 
   listCache.at = 0;
@@ -391,8 +393,17 @@ async function updateGas(id, fields, newFiles, removeIds, onProgress, auth) {
   return res;
 }
 
-/* 파일들을 드라이브로 보내고 목록을 돌려줍니다 (등록·수정 공용) */
-async function sendFilesToDrive(files, onProgress) {
+/* 파일들을 드라이브로 보내고 목록을 돌려줍니다 (등록·수정 공용).
+   thumb 로 넘긴 파일은 role:'thumb' 로 표시해 카드 표지로 씁니다. */
+async function sendFilesToDrive(files, onProgress, thumb) {
+  const all = thumb ? [...files, thumb] : files;
+  const r = await sendList(all, onProgress);
+  if (r.error) return r;
+  if (thumb) r.files[r.files.length - 1].role = 'thumb';
+  return r;
+}
+
+async function sendList(files, onProgress) {
   const total = files.reduce((a, f) => a + f.size, 0) || 1;
   let doneBytes = 0;
   const out = [];
@@ -428,53 +439,12 @@ async function sendFilesToDrive(files, onProgress) {
 }
 
 /* ── gas 업로드 — 파일은 드라이브로 직행 ─────────────────── */
-async function createGas(fields, files, onProgress) {
-  const total = files.reduce((a, f) => a + f.size, 0) || 1;
-  let doneBytes = 0;
-  const uploaded = [];
+async function createGas(fields, files, onProgress, opts = {}) {
+  const uploaded = await sendFilesToDrive(files, onProgress, opts.thumb);
+  if (uploaded.error) return { ok: false, message: uploaded.error };
 
-  for (const f of files) {
-    // ① 이 파일 하나만 받을 수 있는 일회용 주소를 받아옵니다
-    const s = await gasPost({
-      action: 'createUpload',
-      name: f.name,
-      mime: f.type || 'application/octet-stream',
-      size: f.size,
-      origin: location.origin,
-    });
-    if (!s.ok || !s.uploadUrl) {
-      return { ok: false, message: s.message || '업로드 주소를 받지 못했습니다' };
-    }
-
-    // ② 드라이브로 보냅니다.
-    //    먼저 직접 PUT 을 시도하고, 구글이 막으면 조각 릴레이로 자동 전환합니다.
-    const report = (loaded) => { if (onProgress) onProgress(doneBytes + loaded, total, f.name); };
-    let meta;
-    if (directPutOk === false) {
-      meta = await relayToDrive(s.uploadUrl, f, report);
-    } else {
-      try {
-        meta = await putToDrive(s.uploadUrl, f, report);
-        directPutOk = true;
-      } catch (err) {
-        if (directPutOk === true) throw err;      // 되던 게 실패하면 진짜 오류
-        directPutOk = false;                       // 첫 시도부터 막힘 → 릴레이로
-        meta = await relayToDrive(s.uploadUrl, f, report);
-      }
-    }
-    doneBytes += f.size;
-
-    uploaded.push({
-      id: meta.id,
-      originalName: f.name,
-      size: f.size,
-      mime: f.type || '',
-      kind: kindOf(f.name),
-    });
-  }
-
-  // ③ 시트에 한 줄 기록 + 파일 공유 설정
-  const res = await gasPost({ action: 'submit', ...fields, files: uploaded });
+  listCache.at = 0;
+  const res = await gasPost({ action: 'submit', ...fields, files: uploaded.files });
   if (res.ok && res.work) {
     res.work.files = (res.work.files || []).map((x) => ({ ...x, ...driveUrls(x.id, x.kind) }));
   }
