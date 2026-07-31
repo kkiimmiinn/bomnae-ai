@@ -535,10 +535,16 @@ function pageGallery(q) {
   });
 }
 
+/* 지금 수정 중인 결과물. null 이면 새로 올리는 중입니다. */
+let editing = null;
+/* 수정하면서 빼기로 표시한 기존 파일들 */
+let removeMarked = [];
+
 /** 업로드 창 열기 — 페이지를 다시 부르지 않고 그 자리에서 엽니다 */
 function openUploadBox() {
   const b = $('#upBox');
   if (!b) return;
+  if (editing) exitEdit();
   b.style.display = 'block';
   const done = $('#upDone');
   if (done) { done.style.display = 'none'; done.innerHTML = ''; }
@@ -546,11 +552,90 @@ function openUploadBox() {
   setTimeout(() => $('#upForm [name=author]')?.focus(), 350);
 }
 
+/** 내가 올린 결과물을 고치기 — 업로드 창을 그대로 재사용합니다 */
+function startEdit(w) {
+  const box = $('#upBox');
+  const form = $('#upForm');
+  if (!box || !form) return;
+
+  editing = w;
+  removeMarked = [];
+  box.style.display = 'block';
+  box.classList.add('editing');
+
+  form.author.value = w.author || '';
+  form.school.value = w.school || '';
+  form.day.value = String(w.day || 1);
+  form.title.value = w.title || '';
+  form.description.value = w.description || '';
+  form.links.value = (w.links || []).join('\n');
+  form.source.value = w.source || '';
+  form.aiNotice.value = w.aiNotice || '';
+  form.tags.value = (w.tags || []).join(', ');
+  form.dispatchEvent(new CustomEvent('ccai:refill'));       // 분류 목록 다시 채우기
+  setTimeout(() => { form.section.value = w.section || 'etc'; form.section.dispatchEvent(new Event('change')); }, 0);
+
+  $('#upTitle').textContent = '결과물 수정';
+  $('#upLead').innerHTML = '이미 올린 내용을 고칩니다. <b>좋아요와 피드백은 그대로 남습니다.</b>';
+  $('#upBtn').textContent = '수정 저장';
+  $('#upCancel').textContent = '수정 취소';
+  const done = $('#upDone');
+  if (done) { done.style.display = 'none'; done.innerHTML = ''; }
+
+  paintExistingFiles();
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => form.title.focus(), 350);
+}
+
+/** 편집 모드 해제 — 새로 올리는 모드로 되돌립니다 */
+function exitEdit() {
+  const form = $('#upForm');
+  editing = null;
+  removeMarked = [];
+  $('#upBox')?.classList.remove('editing');
+  if ($('#upTitle')) $('#upTitle').textContent = '결과물 올리기';
+  if ($('#upLead')) {
+    $('#upLead').innerHTML = '이미지 · 영상 · 오디오 · PDF · 문서 · zip 모두 됩니다. 한 번에 <b>10개까지, 파일당 400MB</b>. '
+      + '파일 없이 <b>링크만</b> 올려도 됩니다 (노트북 공유 링크, 배포된 웹페이지 URL 등).';
+  }
+  if ($('#upBtn')) $('#upBtn').textContent = '올리기';
+  if ($('#upCancel')) $('#upCancel').textContent = '닫기';
+  if (form) { form.reset(); form.dispatchEvent(new CustomEvent('ccai:refill')); }
+  paintExistingFiles();
+}
+
+/** 수정 중일 때 「이미 올려둔 파일」 목록 */
+function paintExistingFiles() {
+  const box = $('#existingFiles');
+  if (!box) return;
+  const files = (editing && editing.files) || [];
+  if (!files.length) { box.innerHTML = ''; box.style.display = 'none'; return; }
+
+  box.style.display = 'block';
+  box.innerHTML = `<div class="fld-label">이미 올려둔 파일 <span class="hint">빼려면 ✕ 를 누르세요</span></div>
+    ${files.map((f) => {
+      const key = API.isGas ? f.id : (f.url || '').split('/').pop();
+      const off = removeMarked.includes(key);
+      return `<div class="filerow${off ? ' removed' : ''}">
+        <span>${svgIcon({ image: 'image', video: 'video', audio: 'music' }[f.kind] || 'doc', 15)}</span>
+        <span class="nm">${esc(f.originalName)}</span>
+        <span class="sz">${bytes(f.size)}</span>
+        <button type="button" data-unmark="${esc(key)}">${off ? '되돌리기' : '✕'}</button>
+      </div>`;
+    }).join('')}`;
+
+  $$('[data-unmark]', box).forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.unmark;
+    removeMarked = removeMarked.includes(k) ? removeMarked.filter((x) => x !== k) : [...removeMarked, k];
+    paintExistingFiles();
+  }));
+}
+
 function uploadFormHTML(day, section) {
   const me = store.get('me', { author: '', school: '' });
   return `<form id="upForm">
-    <h3 style="font-size:19px;font-weight:850;margin-bottom:4px;color:var(--acc-hi)">결과물 올리기</h3>
-    <p class="small muted" style="margin:0 0 18px">
+    <h3 id="upTitle" style="font-size:19px;font-weight:850;margin-bottom:4px;color:var(--acc-hi)">결과물 올리기</h3>
+    <p class="small muted" style="margin:0 0 18px" id="upLead">
       이미지 · 영상 · 오디오 · PDF · 문서 · zip 모두 됩니다. 한 번에 <b>10개까지, 파일당 400MB</b>.
       파일 없이 <b>링크만</b> 올려도 됩니다 (노트북 공유 링크, 배포된 웹페이지 URL 등).
     </p>
@@ -607,8 +692,10 @@ function uploadFormHTML(day, section) {
         <input name="tags" maxlength="200" placeholder="부래산, 한지수묵담채, 8컷">
       </div>
 
+      <div class="fld full" id="existingFiles" style="display:none"></div>
+
       <div class="fld full">
-        <label>파일</label>
+        <label>파일 <span class="hint" id="fileHint"></span></label>
         <div class="drop" id="drop">
           <div class="big">${svgIcon('clip', 30)}</div>
           <div class="t">클릭하거나 여기로 파일을 끌어다 놓으세요</div>
@@ -659,6 +746,7 @@ function bindUploadForm() {
   }
   daySel.addEventListener('change', fillSections);
   secSel.addEventListener('change', updateHint);
+  form.addEventListener('ccai:refill', fillSections);      // 편집 모드에서 다시 채울 때
   if (wantSection) {
     const s = window.SECTIONS.find((x) => x.id === wantSection);
     if (s && s.day) daySel.value = String(s.day);
@@ -693,14 +781,22 @@ function bindUploadForm() {
     const b = ev.target.closest('[data-rm]');
     if (b) { files.splice(Number(b.dataset.rm), 1); paint(); }
   });
-  $('#upCancel').addEventListener('click', () => { $('#upBox').style.display = 'none'; });
+  $('#upCancel').addEventListener('click', () => {
+    if (editing) { exitEdit(); toast('수정을 취소했습니다'); }
+    $('#upBox').style.display = 'none';
+  });
 
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     const fd = new FormData(form);
     if (!fd.get('author').trim()) return toast('이름을 입력해 주세요', 'err');
     if (!fd.get('title').trim()) return toast('제목을 입력해 주세요', 'err');
-    if (!files.length && !/https?:\/\//i.test(fd.get('links') || '')) {
+
+    // 수정 중이면 이미 올려둔 파일 중 남는 것도 세어 줍니다
+    const keptCount = editing
+      ? (editing.files || []).filter((f) => !removeMarked.includes(API.isGas ? f.id : (f.url || '').split('/').pop())).length
+      : 0;
+    if (!files.length && !keptCount && !/https?:\/\//i.test(fd.get('links') || '')) {
       return toast('파일을 올리거나 링크를 하나 이상 넣어 주세요', 'err');
     }
 
@@ -709,23 +805,44 @@ function bindUploadForm() {
     for (const f of files) fd.append('files', f, f.name);
     store.set('me', { author: fd.get('author').trim(), school: (fd.get('school') || '').trim() });
 
+    const isEdit = Boolean(editing);
     const btn = $('#upBtn'), prog = $('#upProg'), note = $('#upNote');
-    btn.disabled = true; btn.textContent = '올리는 중…'; prog.classList.add('on');
+    btn.disabled = true; btn.textContent = isEdit ? '저장 중…' : '올리는 중…'; prog.classList.add('on');
 
     const fields = {};
     for (const [k, v] of fd.entries()) if (!(v instanceof File)) fields[k] = v;
 
     const done = () => {
-      btn.disabled = false; btn.textContent = '올리기';
+      btn.disabled = false; btn.textContent = isEdit ? '수정 저장' : '올리기';
       prog.classList.remove('on'); $('i', prog).style.width = '0';
       if (note) note.textContent = '';
     };
 
-    API.create(fields, files, (loaded, tot, name) => {
+    const onProg = (loaded, tot, name) => {
       $('i', prog).style.width = `${Math.round((loaded / tot) * 100)}%`;
       if (note) note.textContent = name ? `${name} 전송 중… ${Math.round((loaded / tot) * 100)}%` : '';
-    }).then((res) => {
+    };
+
+    const task = isEdit
+      ? API.update(editing.id, fields, files, removeMarked, onProg,
+        { editKey: (store.get('mine', {}) || {})[editing.id] || '' })
+      : API.create(fields, files, onProg);
+
+    task.then((res) => {
       done();
+
+      if (isEdit) {
+        if (res && res.ok) {
+          toast('수정했습니다', 'ok');
+          exitEdit();
+          $('#upBox').style.display = 'none';
+          loadWorks({ into: $('#works'), countInto: $('#cnt') });
+        } else {
+          toast((res && res.message) || '수정하지 못했습니다', 'err');
+        }
+        return;
+      }
+
       if (res && res.ok) {
         const mine = store.get('mine', {});
         mine[res.work.id] = res.editKey;
@@ -802,7 +919,7 @@ async function loadWorks({ day = 'all', section = 'all', q = '', limit = 0, into
       return;
     }
     into.innerHTML = items.map(workHTML).join('');
-    bindWorkCards(into);
+    bindWorkCards(into, items);
   } catch (err) {
     if (countInto) countInto.textContent = '';
     into.innerHTML = `<div class="empty" style="grid-column:1/-1">
@@ -859,7 +976,8 @@ function workHTML(w) {
         <button class="mini${isLiked ? ' liked' : ''}" data-like>${svgIcon('heart', 14)} <span>${w.likes || 0}</span></button>
         <button class="mini" data-cmt>${svgIcon('comment', 14)} <span>${(w.comments || []).length}</span></button>
         ${(w.files || []).length ? `<a class="mini" href="${esc(w.files[0].url)}" download>${svgIcon('download', 14)} 받기</a>` : ''}
-        ${isMine ? '<button class="mini" data-del style="margin-left:auto;color:var(--danger)">삭제</button>' : ''}
+        ${isMine ? `<button class="mini mini-edit" data-edit style="margin-left:auto">${svgIcon('doc', 14)} 수정</button>
+                    <button class="mini" data-del style="color:var(--danger)">삭제</button>` : ''}
       </div>
 
       <div class="cmts">
@@ -877,9 +995,10 @@ function cmtHTML(c, pending) {
   return `<div class="cmt${pending ? ' pending' : ''}"><b>${esc(c.author)}</b><time>${esc(timeAgo(c.createdAt))}</time><br>${esc(c.text)}</div>`;
 }
 
-function bindWorkCards(root) {
+function bindWorkCards(root, items = []) {
   $$('.work', root).forEach((card) => {
     const id = card.dataset.id;
+    const w = items.find((x) => x.id === id) || { id };
 
     // 좋아요 — 화면을 먼저 바꾸고 서버는 뒤따라갑니다. 실패하면 되돌립니다.
     $('[data-like]', card)?.addEventListener('click', (e) => {
@@ -946,6 +1065,8 @@ function bindWorkCards(root) {
     };
     $('[data-cmt-send]', card)?.addEventListener('click', send);
     $('[data-cmt-input]', card)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+
+    $('[data-edit]', card)?.addEventListener('click', () => startEdit(w));
 
     $('[data-del]', card)?.addEventListener('click', async () => {
       if (!confirm('이 결과물과 첨부 파일을 삭제합니다. 되돌릴 수 없습니다.')) return;

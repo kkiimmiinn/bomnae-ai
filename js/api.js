@@ -215,6 +215,16 @@ window.API = {
     return createGas(fields, files, onProgress);
   },
 
+  /**
+   * 결과물 수정. 본인(editKey) 또는 관리자만 됩니다.
+   * @param removeIds 뺄 기존 파일 — local 은 저장 파일명, gas 는 드라이브 ID
+   * @param newFiles  새로 붙일 File 배열
+   */
+  async update(id, fields, newFiles, removeIds, onProgress, auth = {}) {
+    if (!IS_GAS) return updateLocal(id, fields, newFiles, removeIds, onProgress, auth);
+    return updateGas(id, fields, newFiles, removeIds, onProgress, auth);
+  },
+
   async like(id, undo) {
     if (!IS_GAS) {
       return (await fetch(`/api/works/${id}/like`, {
@@ -282,7 +292,7 @@ window.API = {
       const es = new EventSource('/api/events');
       es.addEventListener('open', () => onEvent('open'));
       es.addEventListener('error', () => onEvent('error'));
-      for (const type of ['work:new', 'work:delete', 'work:like', 'work:comment']) {
+      for (const type of ['work:new', 'work:delete', 'work:like', 'work:comment', 'work:update']) {
         es.addEventListener(type, (e) => {
           if (type === 'work:new') {
             try { const w = JSON.parse(e.data); onEvent('toast', `새 결과물 · ${w.author} 「${w.title}」`); } catch { /* 무시 */ }
@@ -333,6 +343,88 @@ function createLocal(fields, files, onProgress) {
     xhr.addEventListener('error', () => reject(new Error('서버에 연결하지 못했습니다')));
     xhr.send(fd);
   });
+}
+
+/* ── local 수정 ──────────────────────────────────────────── */
+function updateLocal(id, fields, newFiles, removeIds, onProgress, auth) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+    fd.append('removeIds', (removeIds || []).join(','));
+    for (const f of newFiles || []) fd.append('files', f, f.name);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `/api/works/${id}`);
+    xhr.setRequestHeader('x-edit-key', auth.editKey || '');
+    xhr.setRequestHeader('x-admin-pw', auth.adminPw || '');
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total, '');
+    });
+    xhr.addEventListener('load', () => {
+      let res = {};
+      try { res = JSON.parse(xhr.responseText); } catch { /* 무시 */ }
+      resolve(res.ok ? res : { ok: false, message: res.message || `수정 실패 (${xhr.status})` });
+    });
+    xhr.addEventListener('error', () => reject(new Error('서버에 연결하지 못했습니다')));
+    xhr.send(fd);
+  });
+}
+
+/* ── gas 수정 ────────────────────────────────────────────── */
+async function updateGas(id, fields, newFiles, removeIds, onProgress, auth) {
+  const uploaded = await sendFilesToDrive(newFiles || [], onProgress);
+  if (uploaded.error) return { ok: false, message: uploaded.error };
+
+  listCache.at = 0;
+  const res = await gasPost({
+    action: 'update',
+    id,
+    editKey: auth.editKey || '',
+    adminPw: auth.adminPw || '',
+    removeIds: removeIds || [],
+    ...fields,
+    files: uploaded.files,
+  });
+  if (res.ok && res.work) {
+    res.work.files = (res.work.files || []).map((x) => ({ ...x, ...driveUrls(x.id, x.kind || kindOf(x.originalName)) }));
+  }
+  return res;
+}
+
+/* 파일들을 드라이브로 보내고 목록을 돌려줍니다 (등록·수정 공용) */
+async function sendFilesToDrive(files, onProgress) {
+  const total = files.reduce((a, f) => a + f.size, 0) || 1;
+  let doneBytes = 0;
+  const out = [];
+
+  for (const f of files) {
+    const s = await gasPost({
+      action: 'createUpload',
+      name: f.name,
+      mime: f.type || 'application/octet-stream',
+      size: f.size,
+      origin: location.origin,
+    });
+    if (!s.ok || !s.uploadUrl) return { error: s.message || '업로드 주소를 받지 못했습니다', files: [] };
+
+    const report = (loaded) => { if (onProgress) onProgress(doneBytes + loaded, total, f.name); };
+    let meta;
+    if (directPutOk === false) {
+      meta = await relayToDrive(s.uploadUrl, f, report);
+    } else {
+      try {
+        meta = await putToDrive(s.uploadUrl, f, report);
+        directPutOk = true;
+      } catch (err) {
+        if (directPutOk === true) throw err;
+        directPutOk = false;
+        meta = await relayToDrive(s.uploadUrl, f, report);
+      }
+    }
+    doneBytes += f.size;
+    out.push({ id: meta.id, originalName: f.name, size: f.size, mime: f.type || '', kind: kindOf(f.name) });
+  }
+  return { files: out };
 }
 
 /* ── gas 업로드 — 파일은 드라이브로 직행 ─────────────────── */
