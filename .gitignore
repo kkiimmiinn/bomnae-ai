@@ -1,0 +1,6 @@
+# 히어로 배경 이미지는 각자 넣는 것이라 커밋하지 않습니다
+assets/hero/*
+!assets/hero/*.txt
+
+.DS_Store
+Thumbs.db
